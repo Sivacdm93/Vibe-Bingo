@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vibe_Bingo — Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-50 text-slate-900">
+<div class="max-w-6xl mx-auto p-4 space-y-6">
+  <header class="flex items-center justify-between">
+    <h1 class="text-2xl font-bold">Vibe_Bingo — Admin</h1>
+    <a href="index.html" class="text-sm underline">Player View</a>
+  </header>
+
+  <section class="bg-white p-4 rounded-2xl shadow space-y-3">
+    <h2 class="text-lg font-semibold">Connect</h2>
+    <div class="grid md:grid-cols-4 gap-3">
+      <label class="block">Game Code
+        <input id="gameCode" class="w-full border rounded px-3 py-2" placeholder="Vibe_Bingo" />
+      </label>
+      <label class="block">Admin PIN
+        <input id="adminPin" type="password" class="w-full border rounded px-3 py-2" placeholder="Set a PIN" />
+      </label>
+      <button id="createGame" class="px-3 py-2 rounded-xl bg-black text-white">Create/Update Game</button>
+      <button id="resetThemes" class="px-3 py-2 rounded-xl bg-slate-700 text-white">Reset Selected</button>
+    </div>
+    <div class="text-sm text-slate-600">On first run, this will create the game room.</div>
+  </section>
+
+  <section class="bg-white p-4 rounded-2xl shadow space-y-3">
+    <h2 class="text-lg font-semibold">Add Theme</h2>
+    <div class="grid md:grid-cols-3 gap-3">
+      <input id="themeName" class="border rounded px-3 py-2" placeholder="Theme name (e.g., Numbers)" />
+      <textarea id="themeItems" class="border rounded px-3 py-2 md:col-span-2" rows="3" placeholder="Enter at least 25 items, one per line"></textarea>
+    </div>
+    <div class="flex gap-2">
+      <button id="saveTheme" class="px-3 py-2 rounded-xl bg-emerald-600 text-white">Save Theme</button>
+      <button id="listThemes" class="px-3 py-2 rounded-xl bg-slate-700 text-white">Refresh Themes</button>
+    </div>
+    <div id="themesList" class="grid md:grid-cols-2 gap-2"></div>
+  </section>
+
+  <section class="bg-white p-4 rounded-2xl shadow space-y-3">
+    <h2 class="text-lg font-semibold">Select Themes for Game</h2>
+    <div id="allowedThemes" class="flex flex-wrap gap-2"></div>
+    <div class="flex items-center gap-2">
+      <label>Active Theme
+        <select id="activeTheme" class="border rounded px-2 py-2"></select>
+      </label>
+      <button id="initBtn" class="px-3 py-2 rounded-xl bg-indigo-600 text-white">Initiate</button>
+      <button id="startBtn" class="px-3 py-2 rounded-xl bg-rose-600 text-white">Start Game</button>
+      <button id="endBtn" class="px-3 py-2 rounded-xl bg-orange-600 text-white">End</button>
+    </div>
+  </section>
+
+  <section class="bg-white p-4 rounded-2xl shadow space-y-3">
+    <h2 class="text-lg font-semibold">Command Box</h2>
+    <div class="flex gap-2">
+      <input id="callInput" class="flex-1 border rounded px-3 py-2" placeholder="Type next word/number" />
+      <button id="callSend" class="px-3 py-2 rounded-xl bg-black text-white">Send</button>
+    </div>
+    <div id="callHistory" class="text-sm text-slate-700 mt-2"></div>
+  </section>
+
+  <section class="bg-white p-4 rounded-2xl shadow space-y-3">
+    <h2 class="text-lg font-semibold">Players & Scores</h2>
+    <div id="top3" class="text-sm"></div>
+    <div id="players" class="grid md:grid-cols-2 gap-2"></div>
+  </section>
+</div>
+
+<script>
+  // ==== CONFIG (fill these) ====
+  const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";   // TODO: replace
+  const SUPABASE_ANON_KEY = "YOUR-ANON-KEY";                 // TODO: replace
+
+  const { createClient } = supabase;
+  const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  let game=null;
+  async function getOrCreateGame(code, pin){
+    let { data } = await sb.from('games').select('*').eq('code', code).maybeSingle();
+    if(!data){
+      const { data: g, error } = await sb.from('games').insert({ code: code, admin_pin: pin, status:'idle' }).select().single();
+      if(error){ alert(error.message); return null; }
+      data = g;
+    } else {
+      if(data.admin_pin !== pin){ alert('Wrong PIN for this game'); return null; }
+    }
+    return data;
+  }
+
+  const el = id=>document.getElementById(id);
+  const gameCode = el('gameCode');
+  const adminPin = el('adminPin');
+  const createGameBtn = el('createGame');
+  const resetThemesBtn = el('resetThemes');
+
+  const themeName = el('themeName');
+  const themeItems = el('themeItems');
+  const saveThemeBtn = el('saveTheme');
+  const listThemesBtn = el('listThemes');
+  const themesListDiv = el('themesList');
+
+  const allowedThemesDiv = el('allowedThemes');
+  const activeThemeSel = el('activeTheme');
+  const initBtn = el('initBtn');
+  const startBtn = el('startBtn');
+  const endBtn = el('endBtn');
+
+  const callInput = el('callInput');
+  const callSend = el('callSend');
+  const callHistory = el('callHistory');
+
+  const playersDiv = el('players');
+  const top3Div = el('top3');
+
+  createGameBtn.onclick = async ()=>{
+    const code = (gameCode.value.trim() || "Vibe_Bingo");
+    if(!code || !adminPin.value.trim()){ alert('Enter game code and PIN'); return; }
+    game = await getOrCreateGame(code, adminPin.value.trim());
+    if(!game) return;
+    alert('Connected to game: '+game.code);
+    await refreshAllowed();
+    await refreshThemesList();
+    subscribeAll();
+  };
+
+  resetThemesBtn.onclick = async ()=>{
+    if(!game) return;
+    await sb.from('game_themes').delete().eq('game_id', game.id);
+    await sb.from('games').update({ active_theme: null }).eq('id', game.id);
+    await refreshAllowed();
+  };
+
+  async function refreshThemesList(){
+    const { data: th } = await sb.from('themes').select('*').order('created_at', { ascending:false });
+    themesListDiv.innerHTML='';
+    (th||[]).forEach(t=>{
+      const wrap=document.createElement('div');
+      wrap.className='p-3 rounded-xl border';
+      const btn=document.createElement('button');
+      btn.className='px-2 py-1 rounded bg-slate-800 text-white text-xs';
+      btn.textContent='Allow for Game';
+      btn.onclick=()=> toggleAllowed(t.id, true);
+      wrap.innerHTML=`<div class='font-medium'>${t.name}</div><div class='text-xs text-slate-600'>${t.items.length} items</div>`;
+      wrap.appendChild(btn);
+      themesListDiv.appendChild(wrap);
+    });
+  }
+
+  saveThemeBtn.onclick = async ()=>{
+    const name = themeName.value.trim();
+    const items = themeItems.value.split(/\n|,/).map(s=>s.trim()).filter(Boolean);
+    if(!name || items.length<25){ alert('Enter name and at least 25 items'); return; }
+    const { error } = await sb.from('themes').insert({ name, items });
+    if(error){ alert(error.message); return; }
+    themeName.value=''; themeItems.value='';
+    await refreshThemesList();
+  };
+
+  async function toggleAllowed(themeId, add){
+    if(!game) return;
+    if(add){
+      await sb.from('game_themes').insert({ game_id: game.id, theme_id: themeId }).onConflict('game_id,theme_id').ignore();
+    } else {
+      await sb.from('game_themes').delete().match({ game_id: game.id, theme_id: themeId });
+    }
+    await refreshAllowed();
+  }
+
+  async function refreshAllowed(){
+    if(!game) return;
+    const { data } = await sb.from('game_themes').select('theme:themes(*)').eq('game_id', game.id);
+    allowedThemesDiv.innerHTML='';
+    activeThemeSel.innerHTML='';
+    (data||[]).forEach(r=>{
+      const t=r.theme;
+      const tag=document.createElement('div');
+      tag.className='px-2 py-1 rounded-xl border flex items-center gap-2';
+      const rm=document.createElement('button');
+      rm.textContent='×'; rm.className='text-xs'; rm.onclick=()=>toggleAllowed(t.id,false);
+      tag.append(`${t.name}`); tag.appendChild(rm);
+      allowedThemesDiv.appendChild(tag);
+
+      const opt=document.createElement('option');
+      opt.value=t.id; opt.textContent=t.name; activeThemeSel.appendChild(opt);
+    });
+  }
+
+  initBtn.onclick = async ()=>{ if(!game) return; await sb.from('games').update({ status:'initiated' }).eq('id', game.id); };
+  startBtn.onclick = async ()=>{
+    if(!game) return;
+    const themeId = activeThemeSel.value;
+    if(!themeId){ alert('Select active theme'); return; }
+    await sb.from('games').update({ status:'started', active_theme: themeId }).eq('id', game.id);
+  };
+  endBtn.onclick = async ()=>{ if(game) await sb.from('games').update({ status:'ended' }).eq('id', game.id); };
+
+  callSend.onclick = async ()=>{
+    if(!game) return;
+    const item = callInput.value.trim();
+    if(!item){ return; }
+    if(!activeThemeSel.value){ alert('Pick an active theme'); return; }
+    const { data: call, error } = await sb.from('calls').insert({ game_id: game.id, theme_id: activeThemeSel.value, item }).select().single();
+    if(error){ alert(error.message); return; }
+    callHistory.innerHTML = `<div>➤ ${call.item} <span class='text-xs text-slate-500'>${new Date(call.call_at).toLocaleTimeString()}</span></div>` + callHistory.innerHTML;
+    callInput.value='';
+  };
+
+  function subscribeAll(){
+    sb.channel('gamesub')
+      .on('postgres_changes', { event:'*', schema:'public', table:'games' }, (p)=>{ if(game && p.new.id===game.id){ game=p.new; renderTop3(); } })
+      .on('postgres_changes', { event:'*', schema:'public', table:'players' }, renderPlayers)
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'marks' }, handleWinnerCheck)
+      .subscribe();
+  }
+
+  async function renderPlayers(){
+    if(!game) return;
+    const { data: ps } = await sb.from('players').select('id,name,points,lines_completed,bingo').eq('game_id', game.id);
+    const sorted = (ps||[]).sort((a,b)=>{ if(b.lines_completed!==a.lines_completed) return b.lines_completed-a.lines_completed; if(b.points!==a.points) return b.points-a.points; return a.name.localeCompare(b.name); });
+    playersDiv.innerHTML='';
+    sorted.forEach(p=>{
+      const card=document.createElement('div');
+      card.className='p-3 rounded-xl border flex items-center justify-between';
+      card.innerHTML = `<div><div class='font-medium'>${p.name}</div><div class='text-xs text-slate-600'>lines:${p.lines_completed} · pts:${p.points}</div></div><div>${p.bingo?'✅ Bingo':''}</div>`;
+      playersDiv.appendChild(card);
+    });
+  }
+
+  async function handleWinnerCheck(){
+    if(!game) return;
+    const winners = JSON.parse(game.winners||'[]');
+    if(winners.length>=3){ await sb.from('games').update({ status:'ended' }).eq('id', game.id); return; }
+    const { data: ps } = await sb.from('players').select('id,name,bingo').eq('game_id', game.id);
+    const newWinners = ps.filter(p=>p.bingo && !winners.find(w=>w.player_id===p.id));
+    for(const p of newWinners){
+      winners.push({ player_id:p.id, name:p.name, rank:winners.length+1, win_at:new Date().toISOString() });
+      if(winners.length>=3) break;
+    }
+    await sb.from('games').update({ winners: winners }).eq('id', game.id);
+    if(winners.length>=3){ await sb.from('games').update({ status:'ended' }).eq('id', game.id); }
+    renderTop3();
+  }
+
+  function renderTop3(){
+    const W = JSON.parse((game && game.winners) || '[]');
+    top3Div.textContent = W.map(w=>`${w.rank}. ${w.name}`).join('  ·  ');
+  }
+
+  (function(){
+    const last = JSON.parse(localStorage.getItem('admin_last')||'{}');
+    if(last.code) gameCode.value = last.code; else gameCode.value = "Vibe_Bingo";
+    if(last.pin) adminPin.value = last.pin;
+  })();
+  [gameCode, adminPin].forEach(i=> i.addEventListener('change',()=>{
+    localStorage.setItem('admin_last', JSON.stringify({ code:gameCode.value, pin:adminPin.value }));
+  }));
+</script>
+</body>
+</html>
