@@ -161,15 +161,31 @@
     await refreshThemesList();
   };
 
-  async function toggleAllowed(themeId, add){
-    if(!game) return;
-    if(add){
-      await sb.from('game_themes').insert({ game_id: game.id, theme_id: themeId }).onConflict('game_id,theme_id').ignore();
-    } else {
-      await sb.from('game_themes').delete().match({ game_id: game.id, theme_id: themeId });
+async function toggleAllowed(themeId, add) {
+  if (!game) return;
+  if (add) {
+    // Manual duplication check since .onConflict() is not supported in CDN build
+    const existing = await sb
+      .from('game_themes')
+      .select('*')
+      .eq('game_id', game.id)
+      .eq('theme_id', themeId);
+      
+    if (!existing.data || existing.data.length === 0) {
+      await sb.from('game_themes').insert({
+        game_id: game.id,
+        theme_id: themeId
+      });
     }
-    await refreshAllowed();
+  } else {
+    await sb.from('game_themes').delete().match({
+      game_id: game.id,
+      theme_id: themeId
+    });
   }
+  await refreshAllowed();
+}
+
 
   async function refreshAllowed(){
     if(!game) return;
